@@ -1,29 +1,37 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+import requests
 from datetime import date
 
 st.set_page_config(page_title="Gestión Fibra Óptica", layout="wide")
 st.title("📡 Gestión de Clientes - Fibra Óptica")
 
-# Conexión a Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(ttl=0)
+URL_SCRIPT = st.secrets["script_url"]
+COLUMNAS = [
+    "Fecha Visita", "Fecha Agendamiento", "Nombre", "RUT",
+    "Teléfono", "WhatsApp", "Dirección", "Compañía Actual",
+    "Tipo", "Estado", "Observación"
+]
 
-# --- FORMULARIO PARA AGREGAR CLIENTE ---
+datos = requests.get(URL_SCRIPT).json()
+if len(datos) > 1:
+    df = pd.DataFrame(datos[1:], columns=COLUMNAS)
+else:
+    df = pd.DataFrame(columns=COLUMNAS)
+
 with st.expander("➕ Registrar Nueva Visita / Cliente", expanded=True):
     with st.form("form_cliente", clear_on_submit=True):
         c1, c2 = st.columns(2)
         fecha_visita = c1.date_input("Fecha de Visita", value=date.today())
         fecha_agend = c2.date_input("Fecha de Agendamiento", value=date.today())
-        
+
         nombre = st.text_input("Nombre Completo")
         rut = st.text_input("RUT (Ej: 12.345.678-9)")
 
         c3, c4 = st.columns(2)
         telefono = c3.text_input("Teléfono")
         whatsapp = c4.text_input("WhatsApp")
-        
+
         direccion = st.text_input("Dirección y Comuna")
         compania = st.selectbox("Compañía Actual", ["Ninguna", "Entel", "Movistar", "VTR", "Mundo", "Claro", "GTD", "Otra"])
 
@@ -36,25 +44,14 @@ with st.expander("➕ Registrar Nueva Visita / Cliente", expanded=True):
             if nombre.strip() == "":
                 st.error("⚠️ El nombre es obligatorio.")
             else:
-                nuevo = pd.DataFrame([{
-                    "Fecha Visita": str(fecha_visita),
-                    "Fecha Agendamiento": str(fecha_agend),
-                    "Nombre": nombre,
-                    "RUT": rut,
-                    "Teléfono": telefono,
-                    "WhatsApp": whatsapp,
-                    "Dirección": direccion,
-                    "Compañía Actual": compania,
-                    "Tipo": tipo,
-                    "Estado": estado,
-                    "Observación": obs
-                }])
-                df_actualizado = pd.concat([df, nuevo], ignore_index=True)
-                conn.update(data=df_actualizado)
-                st.success(f"✅ Cliente {nombre} guardado en Google Sheets.")
+                fila = [
+                    str(fecha_visita), str(fecha_agend), nombre, rut,
+                    telefono, whatsapp, direccion, compania, tipo, estado, obs
+                ]
+                requests.post(URL_SCRIPT, json={"action": "append", "row": fila})
+                st.success(f"✅ Cliente {nombre} guardado correctamente.")
                 st.rerun()
 
-# --- FUNCIÓN SEMÁFORO ---
 def colorear_filas(row):
     if row["Estado"] == "Muy Interesado":
         return ["background-color: #d4edda; color: #155724"] * len(row)
@@ -64,7 +61,6 @@ def colorear_filas(row):
         return ["background-color: #f8d7da; color: #721c24"] * len(row)
     return [""] * len(row)
 
-# --- PESTAÑAS ---
 tab1, tab2, tab3 = st.tabs(["📋 Base General", "✅ Ventas (Verde)", "❌ No Interesados (Rojo)"])
 
 with tab1:
@@ -78,8 +74,9 @@ with tab1:
         use_container_width=True
     )
     if st.button("💾 Guardar Cambios", use_container_width=True):
-        conn.update(data=df_editado)
-        st.success("Cambios actualizados.")
+        filas_completas = [COLUMNAS] + df_editado.fillna("").astype(str).values.tolist()
+        requests.post(URL_SCRIPT, json={"action": "replace", "rows": filas_completas})
+        st.success("Cambios guardados en Google Sheets.")
         st.rerun()
 
     st.subheader("Vista con Semáforo")
